@@ -1,0 +1,312 @@
+import numpy as np
+from datetime import datetime
+import os
+import pandas as pd
+from scipy.stats import linregress
+import matplotlib.pyplot as plt
+# -----------------------------------------------------------------------------------------------
+def importap(ticker,time1,time2,hours_in_trading_day,atime1,atime2):
+    def cdf(df, x, y):
+        return df[(df['time'] >= x) & (df['time'] <= y)]
+    directory = 'New ap Data'
+    time1_str = time1.strftime('%Y-%m-%d %H-%M-%S')
+    time2_str = time2.strftime('%Y-%m-%d %H-%M-%S')
+    ap_file_path = os.path.join(directory, f'ap({ticker}, {time1_str}, {time2_str})_data.csv')
+    if os.path.exists(ap_file_path):
+        print('ap file can be accessed')
+    else:
+        print("ap file can't be accessed")
+    ap = pd.read_csv(ap_file_path)
+    ap.index = range(1, len(ap) + 1)  # Importing ap
+    print(f'ap was imported for ({ticker}, {time1_str}, {time2_str})')
+    uatime1 = int(atime1.timestamp())
+    uatime2 = int(atime2.timestamp())
+    aP = cdf(ap, uatime1, uatime2)
+    td = hours_in_trading_day * 60 * 60
+    nd = (atime2.timestamp() - atime1.timestamp()) / td
+    ap_ave = pd.DataFrame({'time': ap['time'], 'average price': ap['average price']})
+    aP_ave = pd.DataFrame({'time': aP['time'], 'average price': aP['average price']})
+    print(f'ap was cut to be from {atime1} to {atime2}. There are {nd} days in this sample.')
+    print()
+    return ap, aP, td, ap_ave, aP_ave
+def CA(v, N):
+    v = (
+        v.groupby(data.index // N)  # Group indices into chunks of N
+        .mean()  # Calculate the mean for each chunk
+        .to_frame()  # Convert to DataFrame and rename the column
+    )
+    return v
+def average_previous_tf_values(v, tf):
+    # Calculate the indices to average over
+    indices = [(i + 1) * (tf - 1) for i in range(len(v) // (tf - 1))]
+    # Create a list to store the averaged values
+    averaged_values = [v.iloc[max(0, idx - tf + 1): idx + 1].mean() for idx in indices]
+    # Create a new DataFrame with the averaged values
+    new_df = pd.DataFrame(averaged_values, columns=['Averaged Values'])
+    return new_df
+def EVAI(v, tf):
+    # Calculate the indices to extract
+    indices = [(i + 1) * (tf - 1) for i in range(len(v) // (tf - 1))]
+    # Create a new DataFrame with the extracted values
+    new_df = pd.DataFrame(v.iloc[indices].values, columns=['Extracted Values'])
+    return new_df
+def pddx(v, N):
+    v = v.iloc[:, 0]
+    # Initialize the output vector u as a float series
+    u = pd.Series([0.0] * len(v), index=v.index)
+
+    # Iterate over each index in the vector
+    for i in range(1, len(v)):
+        # Only calculate if there are at least N values
+        if i >= N - 1:
+            # Get the last N values
+            v_subset = v[i - N + 1:i + 1]
+
+            # Perform linear regression on the subset
+            x = np.arange(len(v_subset))
+            slope, _, _, _, _ = linregress(x, v_subset)
+            u[i] = slope
+        else:
+            u[i] = 0.0  # Set to 0 if less than N values are available
+
+    return u
+def SMA(df, column_name, N):
+    """
+    Applies a simple moving average (SMA) of size N to a specified column in the DataFrame,
+    and returns a DataFrame with the SMA values while keeping the same size.
+
+    The first N-1 values are set to 0.
+
+    Parameters:
+    df (pd.DataFrame): The DataFrame containing the data.
+    column_name (str): The name of the column to apply the SMA on.
+    N (int): The window size for the moving average.
+
+    Returns:
+    pd.DataFrame: The modified DataFrame with SMA values and the first N-1 values set to 0.
+    """
+    # Copy the input DataFrame to avoid modifying the original
+    ndf = df.copy()
+
+    # Calculate the rolling mean
+    ndf[column_name] = ndf[column_name].rolling(window=N).mean()
+
+    # Fill the first N-1 entries with 0
+    ndf[column_name] = ndf[column_name].fillna(0)
+
+    return ndf
+def create_boolean_vector(u):
+    """
+    Creates a new DataFrame vector v, where v[i] is True if u[i] < 0, and False otherwise.
+
+    Parameters:
+    u (pd.Series or pd.DataFrame): A single-column DataFrame or Series vector.
+
+    Returns:
+    pd.Series: A vector of the same size as u, containing boolean values.
+    """
+    if isinstance(u, pd.DataFrame):
+        # Ensure it's a single-column DataFrame
+        if u.shape[1] != 1:
+            raise ValueError("Input DataFrame must have only one column.")
+        u = u.iloc[:, 0]  # Extract the single column as a Series
+
+    # Compute the boolean vector
+    v = u < 0
+    return v
+def plot_colored_graph(df):
+    """
+    Plots the first column of a DataFrame as a line plot, coloring the line green
+    when the second column is True, and red when it is False.
+
+    Parameters:
+    df (pd.DataFrame): A DataFrame with two columns. The first column contains numbers,
+                       and the second contains boolean values (True/False).
+    """
+    # Extract the columns
+    y = df.iloc[:, 0]
+    color_condition = df.iloc[:, 1]
+
+    # Set up the plot
+    plt.figure(figsize=(10, 5))
+
+    # Loop through segments and plot with respective colors
+    start_idx = 0
+    for idx in range(1, len(df)):
+        # When the condition changes or at the end, plot the segment
+        if color_condition[idx] != color_condition[start_idx] or idx == len(df) - 1:
+            # Determine the color based on the condition
+            color = 'green' if color_condition[start_idx] else 'red'
+            # Extend to the last index if we're at the end
+            end_idx = idx if idx == len(df) - 1 else idx - 1
+            # Plot the segment
+            plt.plot(range(start_idx, end_idx + 1), y[start_idx:end_idx + 1], color=color)
+            # Update the start index
+            start_idx = idx
+
+    plt.title("Colored Line Graph")
+    plt.xlabel("Index")
+    plt.ylabel("Value")
+    plt.grid(True)
+    plt.show()
+
+def plot_values_at_indices(df, column_name, indices, color, m, N, a):
+    """
+    Plots the values in the specified DataFrame column at given indices as points.
+
+    Parameters:
+    df (pd.DataFrame): The DataFrame containing the data.
+    column_name (str): The name of the column to plot.
+    indices (list): A list of indices where values should be plotted as points.
+    color (str): Color for the points in the scatter plot.
+
+    Returns:
+    None: Displays a scatter plot of the specified points.
+    """
+    # Calculate the actual indices based on m and N
+    calculated_indices = [(value * m) - (N * m) for value in indices]
+
+    # Check if calculated indices should be treated as positional or label-based indices
+    try:
+        # Use .loc if calculated_indices are labels
+        values = df.loc[calculated_indices, column_name]
+    except KeyError:
+        # Use .iloc if calculated_indices are positions
+        values = df.iloc[calculated_indices][column_name]
+
+    # Plotting the points
+    a.scatter(calculated_indices, values, color=color, label='Points at Indices', zorder=10)
+
+    # Optional plot formatting
+    '''
+    a.set_xlabel('Index')
+    a.set_ylabel(column_name)
+    a.set_title(f'Values in {column_name} at Specified Indices')
+    a.legend()
+    '''
+# -----------------------------------------------------------------------------------------------
+# stuff to import
+ticker = 'USDCAD'
+time1 = datetime(2024, 5, 1)
+time2 = datetime(2024, 9, 1)
+atime1 = datetime(2024, 5, 1)
+atime2 = datetime(2024, 9, 1)
+F = 7/100000
+N1 = 3750
+N2 = 120
+N3 = 2000
+n = 15
+I = 3000
+thrs = 360 # 360
+tf = 60
+R = 0
+graph_SMA_color = True
+plot_SMA_and_dx = True
+plot_K = True
+plot_real_vs_SMA = True
+# -----------------------------------------------------------------------------------------------
+# Getting aP
+ap, aP, td, ap_ave, aP_ave = importap(ticker, time1, time2, 24, atime1, atime2)
+
+# Getting bid, ask, and aP0
+aP0 = aP[aP['average price'] != 0]
+ndata = aP0['average price'].reset_index(drop=True)
+bid = EVAI(aP0['bid'], tf)
+ask = EVAI(aP0['ask'], tf)
+data = EVAI(aP0['average price'], tf)
+print('Data sliced successfully')
+
+sdata = SMA(data, 'Extracted Values', N1)
+
+# Calculating the pseduo-derivative
+pd_sdata_dx = pddx(sdata, N2)
+pd_sdata_dx = pd.DataFrame(pd_sdata_dx)
+pd_sdata_dx = pd_sdata_dx[0]/sdata['Extracted Values']
+pd_sdata_dx.fillna(0, inplace=True)
+pd_sdata_dx = pd.DataFrame(pd_sdata_dx)
+pd_sdata_dx.columns = ['slope']
+pd_sdata_dx = SMA(pd_sdata_dx, 'slope', N3)
+pd_sdata_dx = pd_sdata_dx.map(lambda x: 0 if 0 > x > R else x)
+
+# Combining Dataframes
+combined_df = pd.concat([bid, ask, pd_sdata_dx], axis=1)
+combined_df.columns = ['bid', 'ask', 'signal']
+combined_df = combined_df.iloc[N1+N2:].reset_index(drop=True)
+
+'''
+plt.plot(combined_df['signal'])
+plt.axhline(y=0, color = 'black')
+plt.show()
+'''
+# -----------------------------------------------------------------------------------------------
+def Signal(t, B, S, f1, k, K, b, F,cb, P, I, n, cs):
+    dk = K / n
+    if f1 < 0:
+        if k != 0:
+            cb += -1
+        if k == 0 or (k <= K - dk and cb == 0):
+            k += dk
+            if k > K:
+                k = K
+                dk = dk - (K - k)
+            b += dk * B
+            cb = I/n
+            BD.append(t)
+    if f1 >= 0:
+        if k != 0:
+            K = (b/S - 2 * F) + K - k
+            k = 0
+            b = 0
+            SD.append(t)
+    return k, b, cb, P, cs, K
+# -----------------------------------------------------------------------------------------------
+k = 0
+K = 1
+b = 0
+cb = 0
+cs = 0
+P = 0
+BD = []
+SD = []
+KD = []
+for index, row in combined_df.iterrows():
+    B = row['bid']
+    S = row['ask']
+    f1 = row['signal']
+    t = index
+
+    k, b, cb, P, cs, K = Signal(t, B, S, f1, k, K, b, F,cb, P, I, n, cs)
+    KD.append(K)
+# -----------------------------------------------------------------------------------------------
+print(f'{round(100*(K/1 - 1), 5)}%')
+BD = [x + N1+ N2 for x in BD]
+SD = [x + N1 + N2 for x in SD]
+
+if plot_real_vs_SMA:
+    plt.plot(sdata.iloc[N1:], zorder = 9)
+    plt.plot(bid)
+    plt.title('Real Data vs SMA')
+    plt.show()
+if graph_SMA_color:
+    Npd_sdata_dx = pd_sdata_dx.iloc[N1 + N2:]
+    B = create_boolean_vector(Npd_sdata_dx)
+    Nsdata = sdata.iloc[N1 + N2:]
+    data = pd.concat([Nsdata, B], axis=1)
+    data = data.reset_index(drop = True)
+    plot_colored_graph(data)
+if plot_SMA_and_dx:
+    fig, bx1 = plt.subplots()
+
+    bx1.plot(sdata[N1 + N2:], color = 'black')
+    # bx1.plot(nbid, color = 'blue')
+    plot_values_at_indices(sdata[N1 + N2:], 'Extracted Values', SD, 'r', 1, 0, bx1)
+    plot_values_at_indices(sdata[N1 + N2:], 'Extracted Values', BD, 'b', 1, 0, bx1)
+
+    bx2 = bx1.twinx()
+    bx2.axhline(0, color = 'red')
+    bx2.plot(pd_sdata_dx.iloc[N1 + N2 + N3:], color = 'purple')
+    #bx2.plot(p2d_sdata_d2x.iloc[N1 + 2 * N2:], color='pink')
+    plt.show()
+if plot_K:
+    plt.plot(KD)
+    plt.show()
